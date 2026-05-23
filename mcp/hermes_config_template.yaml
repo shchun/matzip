@@ -1,0 +1,15 @@
+# ~/.hermes/config.yaml 에 복사해서 사용
+# 환경변수는 ~/.hermes/.env 에 설정
+
+mcp_servers:
+  matzip:
+    command: "python"
+    args: ["C:/projects/matzip/mcp/matzip_mcp.py"]
+    env:
+      DATABASE_URL: "${DATABASE_URL}"
+      GOOGLE_MAPS_API_KEY: "${GOOGLE_MAPS_API_KEY}"
+      SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN}"
+      SLACK_CHANNEL: "${SLACK_CHANNEL}"
+      PROXIMITY_RADIUS_METERS: "${PROXIMITY_RADIUS_METERS}"
+      HOME_LAT: "${HOME_LAT}"
+      HOME_LNG: "${HOME_LNG}"
