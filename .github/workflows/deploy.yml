@@ -1,0 +1,85 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mcp/**'
+      - 'scripts/**'
+      - 'data/**'
+      - 'docker-compose.yml'
+  workflow_dispatch:
+    inputs:
+      reimport_csv:
+        description: 'CSV 데이터 재임포트 (data/*.csv → PostgreSQL)'
+        type: boolean
+        default: false
+
+env:
+  EC2_USER: ubuntu
+  EC2_HOST: ${{ secrets.EC2_HOST }}
+  MATZIP_DIR: /home/ubuntu/matzip
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # git diff HEAD~1 용
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync files to EC2
+        run: |
+          rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='mcp/.venv/' \
+            --exclude='**/__pycache__/' \
+            --exclude='**/*.pyc' \
+            --exclude='docs/' \
+            --exclude='deploy/' \
+            -e "ssh -i ~/.ssh/id_deploy" \
+            . "$EC2_USER@$EC2_HOST:$MATZIP_DIR/"
+
+      - name: Update MCP Python dependencies
+        run: |
+          ssh -i ~/.ssh/id_deploy "$EC2_USER@$EC2_HOST" \
+            "$MATZIP_DIR/mcp/.venv/bin/pip install -q --upgrade -r $MATZIP_DIR/mcp/requirements.txt"
+
+      - name: Detect CSV changes
+        id: csv
+        if: github.event_name == 'push'
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q '^data/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reimport CSV data
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.reimport_csv == true) ||
+          (github.event_name == 'push' && steps.csv.outputs.changed == 'true')
+        run: |
+          ssh -i ~/.ssh/id_deploy "$EC2_USER@$EC2_HOST" \
+            "cd $MATZIP_DIR && mcp/.venv/bin/python scripts/import_csv.py"
+
+      - name: Restart hermes-gateway
+        run: |
+          ssh -i ~/.ssh/id_deploy "$EC2_USER@$EC2_HOST" \
+            "systemctl --user restart hermes-gateway"
+
+      - name: Verify gateway is running
+        run: |
+          sleep 5
+          ssh -i ~/.ssh/id_deploy "$EC2_USER@$EC2_HOST" \
+            "systemctl --user is-active hermes-gateway && echo '✓ Gateway OK'"
